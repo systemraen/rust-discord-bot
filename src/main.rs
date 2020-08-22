@@ -4,32 +4,23 @@ use {
         client::{Client, Context, EventHandler},
         framework::standard::{
             help_commands,
-            macros::{command, group, help},
-            Args, CommandGroup, CommandResult, HelpOptions, StandardFramework,
+            macros::{command, group, help, hook},
+            Args, CommandGroup, CommandResult, Delimiter, HelpOptions, StandardFramework,
         },
+        http::Http,
         model::{channel::Message, id::UserId},
         prelude::*,
     },
     std::{
         collections::{HashMap, HashSet},
         env,
-        fmt::Write,
     },
 };
-
-#[group]
-#[commands(ping, pong)]
-struct General;
 
 struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {}
-
-struct CommandCounter;
-impl TypeMapKey for CommandCounter {
-    type Value = HashMap<String, u64>;
-}
 
 #[help]
 #[individual_command_tip = "Hello! こんにちは！Hola! Bonjour! 您好!\n\
@@ -49,19 +40,46 @@ async fn my_help(
 ) -> CommandResult {
     //msg.reply(ctx, format!("{:?}", groups)).await?;
     let _ = help_commands::with_embeds(ctx, msg, args, help_options, groups, owners).await;
-    
     Ok(())
+}
+
+#[hook]
+async fn unknown_command(ctx: &Context, msg: &Message, _cmd: &str) {
+    if msg.content.starts_with('!') {
+        if let Err(why) = msg.reply(ctx, "Brrr... don't know that one").await {
+            println!("Error occured on unknown_command reply: {:?}", why);
+        };
+    }
 }
 
 #[tokio::main]
 async fn main() {
+    let token = env::var("DISCO_MONK_TOKEN").expect("Missing token from environment");
+    let http = Http::new_with_token(&token);
+
+    let (owners, bot_id) = match http.get_current_application_info().await {
+        Ok(info) => {
+            let mut owners = HashSet::new();
+            owners.insert(info.owner.id);
+
+            (owners, info.id)
+        }
+        Err(why) => panic!("Could not access application info {:?}", why),
+    };
+
     let framework = StandardFramework::new()
-        .configure(|c| c.prefix("!"))
+        .configure(|c| {
+            c.with_whitespace(true)
+                .on_mention(Some(bot_id))
+                .prefix("!")
+                .delimiters(vec![", ", ","])
+                .owners(owners)
+        })
         .help(&MY_HELP)
-        .group(&GENERAL_GROUP);
+        .group(&GENERAL_GROUP)
+        .unrecognised_command(unknown_command);
 
     // Login with a bot token from the environment
-    let token = env::var("DISCORD_TOKEN").expect("token");
     let mut client = Client::new(token)
         .event_handler(Handler)
         .framework(framework)
@@ -74,6 +92,10 @@ async fn main() {
     }
 }
 
+#[group]
+#[commands(ping, pong, list, join, drop, play, loop_sound)]
+struct General;
+
 #[command]
 async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
     msg.reply(ctx, "Pong!").await?;
@@ -85,5 +107,64 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 async fn pong(ctx: &Context, msg: &Message) -> CommandResult {
     msg.reply(ctx, "Ping!").await?;
 
+    Ok(())
+}
+
+#[command]
+async fn list(ctx: &Context, msg: &Message) -> CommandResult {
+    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
+    msg.reply(ctx, format!("{:#?}", roles)).await?;
+
+    Ok(())
+}
+
+#[command]
+async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let potential_role_name = args.rest();
+    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
+    
+    if let Some(guild) = msg.guild(&ctx.cache).await {
+        // `role_by_name()` allows us to attempt attaining a reference to a role
+        // via its name.
+        if let Some(role) = guild.role_by_name(&potential_role_name) {
+
+            if let Err(why) = msg.channel_id.say(&ctx.http, &format!("Role-ID: {}", role.id)).await {
+                println!("Error sending message: {:?}", why);
+            }
+
+            return Ok(());
+        }
+    }
+
+    if let Err(why) = msg.channel_id.say(&ctx.http, format!("Could not find role named: {:?}", potential_role_name)).await {
+        println!("Error sending message: {:?}", why);
+    }
+
+    Ok(())
+}
+
+#[command]
+async fn drop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
+    let potential_role_name = args.rest();
+    let asdf = potential_role_name.split(",");
+
+    for role in asdf {
+        if roles.contains(&role) {
+            // todo: check if user is actually in role
+            msg.reply(ctx, format!("Leaving {}", role)).await?;
+        }
+    }    
+
+    Ok(())
+}
+
+#[command]
+async fn play(ctx: &Context, msg: &Message) -> CommandResult {
+    Ok(())
+}
+
+#[command]
+async fn loop_sound(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
