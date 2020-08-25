@@ -46,10 +46,20 @@ async fn my_help(
 #[hook]
 async fn unknown_command(ctx: &Context, msg: &Message, _cmd: &str) {
     if msg.content.starts_with('!') {
-        if let Err(why) = msg.reply(ctx, "Brrr... don't know that one").await {
+        if let Err(why) = msg.reply(ctx, "bzzz... don't know that one :pensive:").await {
             println!("Error occured on unknown_command reply: {:?}", why);
         };
     }
+}
+
+struct JoinableRoles;
+impl TypeMapKey for JoinableRoles {
+    type Value = Vec<String>;
+}
+
+//https://stackoverflow.com/a/38183903/349575
+macro_rules! vec_of_strings {
+    ($($x:expr), *) => (vec![$($x.to_string()), *]);
 }
 
 #[tokio::main]
@@ -86,6 +96,13 @@ async fn main() {
         .await
         .expect("Error creating client");
 
+    {
+        let mut data = client.data.write().await;
+        data.insert::<JoinableRoles>(vec_of_strings![
+            "bot watchers", "politics", "makers", "venters"
+        ]);
+    }
+
     // start listening for events by starting a single shard
     if let Err(why) = client.start().await {
         println!("An error occurred while running the client: {:?}", why);
@@ -112,7 +129,8 @@ async fn pong(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 async fn list(ctx: &Context, msg: &Message) -> CommandResult {
-    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
+    let data = ctx.data.read().await;
+    let roles = data.get::<JoinableRoles>().expect("Expected JoinableRoles in TypeMap");
     msg.reply(ctx, format!("{:#?}", roles)).await?;
 
     Ok(())
@@ -121,15 +139,18 @@ async fn list(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let potential_role_name = args.rest();
-    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
-    
+
     if let Some(guild) = msg.guild(&ctx.cache).await {
         // `role_by_name()` allows us to attempt attaining a reference to a role
         // via its name.
         if let Some(role) = guild.role_by_name(&potential_role_name) {
+            let data = ctx.data.read().await;
+            let roles = data.get::<JoinableRoles>().expect("Expected JoinableRoles in TypeMap");
 
-            if let Err(why) = msg.channel_id.say(&ctx.http, &format!("Role-ID: {}", role.id)).await {
-                println!("Error sending message: {:?}", why);
+            if roles.contains(&potential_role_name.to_string()) {
+                if let Err(why) = msg.channel_id.say(&ctx.http, &format!("Role-ID: {}", role.id)).await {
+                    println!("Error sending message: {:?}", why);
+                }
             }
 
             return Ok(());
@@ -145,12 +166,13 @@ async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 #[command]
 async fn drop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let roles = vec!["bot-watchers", "politics", "makers", "venters"];
+    let data = ctx.data.read().await;
+    let roles = data.get::<JoinableRoles>().expect("Unable to get JoinableRoles from context");
     let potential_role_name = args.rest();
     let asdf = potential_role_name.split(",");
 
     for role in asdf {
-        if roles.contains(&role) {
+        if roles.contains(&role.to_string()) {
             // todo: check if user is actually in role
             msg.reply(ctx, format!("Leaving {}", role)).await?;
         }
