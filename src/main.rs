@@ -1,6 +1,6 @@
 use {
     serenity::{
-        async_trait,
+        async_trait, builder,
         client::{Client, Context, EventHandler},
         framework::standard::{
             help_commands,
@@ -46,7 +46,10 @@ async fn my_help(
 #[hook]
 async fn unknown_command(ctx: &Context, msg: &Message, _cmd: &str) {
     if msg.content.starts_with('!') {
-        if let Err(why) = msg.reply(ctx, "bzzz... don't know that one :pensive:").await {
+        if let Err(why) = msg
+            .reply(ctx, "bzzz... don't know that one :pensive:")
+            .await
+        {
             println!("Error occured on unknown_command reply: {:?}", why);
         };
     }
@@ -99,7 +102,10 @@ async fn main() {
     {
         let mut data = client.data.write().await;
         data.insert::<JoinableRoles>(vec_of_strings![
-            "bot watchers", "politics", "makers", "venters"
+            "bot watchers",
+            "politics",
+            "makers",
+            "venters"
         ]);
     }
 
@@ -128,9 +134,20 @@ async fn pong(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
+#[sub_commands(roles)]
 async fn list(ctx: &Context, msg: &Message) -> CommandResult {
+    // todo: list subcommands
+
+    Ok(())
+}
+
+#[command]
+async fn roles(ctx: &Context, msg: &Message) -> CommandResult {
     let data = ctx.data.read().await;
-    let roles = data.get::<JoinableRoles>().expect("Expected JoinableRoles in TypeMap");
+    let roles = data
+        .get::<JoinableRoles>()
+        .expect("Unable to get JoinableRoles from context");
+
     msg.reply(ctx, format!("{:#?}", roles)).await?;
 
     Ok(())
@@ -145,11 +162,18 @@ async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         // via its name.
         if let Some(role) = guild.role_by_name(&potential_role_name) {
             let data = ctx.data.read().await;
-            let roles = data.get::<JoinableRoles>().expect("Expected JoinableRoles in TypeMap");
+            let roles = data
+                .get::<JoinableRoles>()
+                .expect("Unable to get JoinableRoles from context");
 
             if roles.contains(&potential_role_name.to_string()) {
-                if let Err(why) = msg.channel_id.say(&ctx.http, &format!("Role-ID: {}", role.id)).await {
-                    println!("Error sending message: {:?}", why);
+                
+                if let Some(member) = msg.member(&ctx.cache).await {
+                    let mut m_roles = member.roles;
+                    m_roles.push(role.id);                    
+
+                    guild.edit_member(&ctx.http, msg.author.id, |m| m.roles(m_roles)).await?;
+                    msg.reply(ctx, format!("Joining {}", role.name)).await?;
                 }
             }
 
@@ -157,7 +181,14 @@ async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     }
 
-    if let Err(why) = msg.channel_id.say(&ctx.http, format!("Could not find role named: {:?}", potential_role_name)).await {
+    if let Err(why) = msg
+        .channel_id
+        .say(
+            &ctx.http,
+            format!("Could not find role named: {:?}", potential_role_name),
+        )
+        .await
+    {
         println!("Error sending message: {:?}", why);
     }
 
@@ -167,16 +198,18 @@ async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[command]
 async fn drop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let data = ctx.data.read().await;
-    let roles = data.get::<JoinableRoles>().expect("Unable to get JoinableRoles from context");
+    let roles = data
+        .get::<JoinableRoles>()
+        .expect("Unable to get JoinableRoles from context");
     let potential_role_name = args.rest();
-    let asdf = potential_role_name.split(",");
+    let arg_split = potential_role_name.split(",");
 
-    for role in asdf {
+    for role in arg_split {
         if roles.contains(&role.to_string()) {
             // todo: check if user is actually in role
             msg.reply(ctx, format!("Leaving {}", role)).await?;
         }
-    }    
+    }
 
     Ok(())
 }
