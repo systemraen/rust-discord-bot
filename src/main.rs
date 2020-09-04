@@ -171,7 +171,8 @@ async fn join(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             for arg in args.iter::<String>() {
                 let potential_role_name = arg.expect("");
                 if let Some(role) = guild.role_by_name(&potential_role_name) {
-                    if joinable_roles.contains(&potential_role_name) {
+                    if joinable_roles.contains(&potential_role_name) && !to_join.contains(&role.id)
+                    {
                         to_join.push(role.id);
                         join_names.push(potential_role_name.clone());
                     }
@@ -196,8 +197,6 @@ async fn join(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     Ok(())
 }
-
-
 
 #[command]
 async fn drop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
