@@ -5,7 +5,8 @@ use {
         framework::standard::{
             help_commands,
             macros::{command, group, help, hook},
-            Args, CommandGroup, CommandResult, Delimiter, HelpOptions, StandardFramework,
+            Args, CommandError, CommandGroup, CommandResult, Delimiter, HelpOptions,
+            StandardFramework,
         },
         http::Http,
         model::{channel::Message, id::UserId},
@@ -154,46 +155,49 @@ async fn roles(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
-async fn join(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let potential_role_name = args.rest();
+async fn join(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let data = ctx.data.read().await;
+    let joinable_roles = data
+        .get::<JoinableRoles>()
+        .expect("Unable to get JoinableRoles from context");
 
-    if let Some(guild) = msg.guild(&ctx.cache).await {
-        // `role_by_name()` allows us to attempt attaining a reference to a role
-        // via its name.
-        if let Some(role) = guild.role_by_name(&potential_role_name) {
-            let data = ctx.data.read().await;
-            let roles = data
-                .get::<JoinableRoles>()
-                .expect("Unable to get JoinableRoles from context");
+    if let Some(member) = msg.member(&ctx.cache).await {
+        if let Some(guild) = msg.guild(&ctx.cache).await {
+            let mut to_join = Vec::new();
+            let mut join_names = Vec::new();
 
-            if roles.contains(&potential_role_name.to_string()) {
-                
-                if let Some(member) = msg.member(&ctx.cache).await {
-                    let mut m_roles = member.roles;
-                    m_roles.push(role.id);                    
+            to_join.extend_from_slice(&member.roles);
 
-                    guild.edit_member(&ctx.http, msg.author.id, |m| m.roles(m_roles)).await?;
-                    msg.reply(ctx, format!("Joining {}", role.name)).await?;
+            for arg in args.iter::<String>() {
+                let potential_role_name = arg.expect("");
+                if let Some(role) = guild.role_by_name(&potential_role_name) {
+                    if joinable_roles.contains(&potential_role_name) {
+                        to_join.push(role.id);
+                        join_names.push(potential_role_name.clone());
+                    }
                 }
             }
 
-            return Ok(());
-        }
-    }
+            #[cfg(debug_assertions)]
+            println!("Joining: \n{:?}\n{:?}", &join_names, &to_join);
 
-    if let Err(why) = msg
-        .channel_id
-        .say(
-            &ctx.http,
-            format!("Could not find role named: {:?}", potential_role_name),
-        )
-        .await
-    {
-        println!("Error sending message: {:?}", why);
+            if let Err(why) = guild
+                .edit_member(&ctx.http, msg.author.id, |m| m.roles(&to_join))
+                .await
+            {
+                #[cfg(debug_assertions)]
+                println!("Edit Member Failed: {}", why);
+            } else {
+                msg.reply(&ctx.http, format!("Joining {:?}", join_names))
+                    .await?;
+            }
+        }
     }
 
     Ok(())
 }
+
+
 
 #[command]
 async fn drop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
